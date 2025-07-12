@@ -22,6 +22,7 @@ app.get('/', (req, res) => {
                 </style>
             </head>
             <body>
+            
                 <h1>🤖 Bot de Figurinhas WhatsApp</h1>
                 <div class="qr-container">
                     ${latestQR ? 
