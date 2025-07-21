@@ -119,7 +119,3 @@ client.on('message', async (message) => {
 // Inicializa o cliente
 console.log('🚀 Iniciando Bot de Figurinhas...');
 client.initialize();
-// Keep Alive
-setInterval(() => {
-    require('http').get(process.env.RENDER_EXTERNAL_URL || 'http://localhost:3000');
-}, 5 * 60 * 1000);
