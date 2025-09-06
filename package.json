@@ -1,10 +1,16 @@
 {
   "name": "bot-figurinhas",
-  "version": "1.0.0",
-  "description": "Bot de figurinhas para WhatsApp",
+  "version": "2.0.0",
+  "description": "Bot de figurinhas para WhatsApp com recursos avançados",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
   },
   "dependencies": {
     "express": "^4.18.2",
@@ -14,5 +20,19 @@
     "qrcode-terminal": "^0.12.0",
     "sharp": "^0.32.0",
     "whatsapp-web.js": "^1.23.0"
+  },
+  "keywords": [
+    "whatsapp",
+    "bot",
+    "sticker",
+    "figurinha",
+    "webp",
+    "nodejs"
+  ],
+  "author": "Pedro",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PedroPiresy/Bot_Sticker"
   }
 }

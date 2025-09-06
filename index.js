@@ -3,26 +3,20 @@ const { stickerFromImage } = require('./commands/stickerFromImage');
 const { stickerFromVideo } = require('./commands/stickerFromVideo');
 const { isVideoOrGif } = require('./utils/convertToSticker');
 const { setQRCode } = require('./server');
+const config = require('./config');
+const logger = require('./utils/logger');
+const rateLimiter = require('./utils/rateLimiter');
+const stats = require('./utils/stats');
 
 const client = new Client({
     authStrategy: new LocalAuth(),
-    puppeteer: { 
-        headless: true,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--disable-gpu'
-        ]
-    },
+    puppeteer: config.whatsapp.puppeteer
 });
 
 client.on('qr', (qr) => {
     console.clear();
-    const baseUrl = process.env.RENDER_EXTERNAL_URL || 'http://localhost:3000';
+    const baseUrl = process.env.RENDER_EXTERNAL_URL || `http://localhost:${config.server.port}`;
+    logger.info('QR Code gerado para autenticação');
     console.log('📱 QR Code gerado!');
     console.log(`🌐 Acesse: ${baseUrl}/qrcode`);
     console.log('📋 Ou acesse a URL raiz para ver o painel completo');
@@ -30,43 +24,42 @@ client.on('qr', (qr) => {
 });
 
 client.on('ready', () => {
+    logger.info('Bot de Figurinhas conectado e pronto');
     console.log('🤖 Bot de Figurinhas está pronto e conectado!');
     console.log('✅ WhatsApp Web conectado com sucesso!');
 });
 
 client.on('authenticated', () => {
+    logger.info('Autenticação realizada com sucesso');
     console.log('🔐 Autenticação realizada com sucesso!');
 });
 
 client.on('auth_failure', (msg) => {
+    logger.error('Falha na autenticação', { message: msg });
     console.error('❌ Falha na autenticação:', msg);
 });
 
 client.on('disconnected', (reason) => {
+    logger.warn('Bot desconectado', { reason });
     console.log('🔌 Desconectado:', reason);
 });
 
 client.on('message', async (message) => {
     try {
+        const userId = message.from;
+        
+        // Verifica rate limiting
+        if (!rateLimiter.isAllowed(userId)) {
+            const remainingTime = rateLimiter.getRemainingTime(userId);
+            logger.warn('Rate limit excedido', { userId, remainingTime });
+            await message.reply(config.messages.errors.rateLimit);
+            return;
+        }
+
         // Comando de ajuda
         if (message.body.toLowerCase() === '!figurinha') {
-            await message.reply(
-                '🎨 *BOT DE FIGURINHAS* 🎨\n\n' +
-                '📸 *COMO USAR:*\n' +
-                '• Envie uma *imagem* para criar figurinha\n' +
-                '• Responda com *!figurinha* para ver este menu\n\n' +
-                '📋 *FORMATOS SUPORTADOS:*\n' +
-                '• ✅ Imagens: JPG, PNG, WEBP\n' +
-                '• 🔄 GIFs e Vídeos: *Em breve!*\n\n' +
-                '⚠️ *IMPORTANTE:*\n' +
-                '• Tamanho máximo: 16MB\n' +
-                '• Qualidade otimizada automaticamente\n\n' +
-                '🚀 *NOVIDADES EM BREVE:*\n' +
-                '• 🎬 Figurinhas animadas (GIF/Vídeo)\n' +
-                '• ⏱️ Vídeos até 10 segundos\n' +
-                '• 🎯 Crop automático\n\n' +
-                '💡 *Dica:* Envie sua imagem agora!'
-            );
+            await message.reply(config.messages.help);
+            logger.info('Comando de ajuda enviado', { userId });
             return;
         }
 
@@ -75,47 +68,59 @@ client.on('message', async (message) => {
             const media = await message.downloadMedia();
             
             if (media) {
-                console.log(`📁 Mídia recebida: ${media.mimetype} de ${message.from}`);
+                logger.info('Mídia recebida', { 
+                    userId, 
+                    mimetype: media.mimetype,
+                    size: media.data.length 
+                });
                 
-                if (media.mimetype.startsWith('image/') && media.mimetype !== 'image/gif') {
+                // Verifica tamanho do arquivo
+                if (media.data.length > config.sticker.maxFileSize) {
+                    await message.reply(config.messages.errors.fileTooLarge);
+                    logger.warn('Arquivo muito grande', { 
+                        userId, 
+                        size: media.data.length,
+                        maxSize: config.sticker.maxFileSize 
+                    });
+                    return;
+                }
+                
+                if (config.sticker.supportedImageFormats.includes(media.mimetype)) {
                     // Imagem estática
-                    await message.reply('⚡ *Processando sua imagem...*\n🎨 Criando figurinha personalizada!');
+                    await message.reply(config.messages.processing.image);
                     await stickerFromImage(message, media);
+                    stats.recordSticker(userId, 'image');
+                    logger.info('Figurinha de imagem criada', { userId, mimetype: media.mimetype });
                 } else if (isVideoOrGif(media.mimetype)) {
-                    // Vídeo ou GIF animado - Em breve
-                    await message.reply(
-                        '🎬 *Figurinhas Animadas - Em Breve!*\n\n' +
-                        '🔄 Detectamos que você enviou um GIF/vídeo\n' +
-                        '⏳ Esta funcionalidade estará disponível em breve!\n\n' +
-                        '📸 *Por enquanto, envie uma imagem* para criar\n' +
-                        'sua figurinha estática! 🎨'
-                    );
+                    // Vídeo ou GIF animado
+                    await message.reply(config.messages.processing.video);
+                    await stickerFromVideo(message, media);
+                    stats.recordSticker(userId, 'video');
+                    logger.info('Figurinha animada criada', { userId, mimetype: media.mimetype });
                 } else {
-                    await message.reply(
-                        '❌ *Formato não suportado*\n\n' +
-                        '📋 *Formatos aceitos:*\n' +
-                        '• ✅ JPG, PNG, WEBP\n' +
-                        '• 🔄 GIF/Vídeo (em breve)\n\n' +
-                        '💡 *Dica:* Envie uma imagem para criar sua figurinha!'
-                    );
+                    await message.reply(config.messages.errors.unsupportedFormat);
+                    stats.recordError();
+                    logger.warn('Formato não suportado', { userId, mimetype: media.mimetype });
                 }
             } else {
-                await message.reply(
-                    '❌ *Erro ao processar mídia*\n\n' +
-                    '🔄 Tente novamente ou verifique se:\n' +
-                    '• O arquivo não está corrompido\n' +
-                    '• O tamanho é menor que 16MB\n' +
-                    '• O formato é suportado\n\n' +
-                    '💬 Digite *!figurinha* para ver os formatos aceitos'
-                );
+                await message.reply(config.messages.errors.processingError);
+                stats.recordError();
+                logger.error('Erro ao baixar mídia', { userId });
             }
         }
     } catch (error) {
+        stats.recordError();
+        logger.error('Erro ao processar mensagem', { 
+            userId: message.from, 
+            error: error.message,
+            stack: error.stack 
+        });
         console.error('❌ Erro ao processar mensagem:', error);
         await message.reply('❌ Ocorreu um erro interno. Tente novamente em alguns instantes.');
     }
 });
 
 // Inicializa o cliente
+logger.info('Iniciando Bot de Figurinhas');
 console.log('🚀 Iniciando Bot de Figurinhas...');
 client.initialize();
